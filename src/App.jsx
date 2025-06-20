@@ -1,137 +1,101 @@
-import React, { useState, useEffect } from "react";
-import { initializeApp } from "firebase/app";
-import {
-    getAuth,
-    signInAnonymously,
-    signInWithCustomToken,
-    onAuthStateChanged,
-} from "firebase/auth";
-import {
-    getFirestore,
-    doc,
-    addDoc,
-    onSnapshot,
-    collection,
-    serverTimestamp,
-    getDoc,
-    updateDoc,
-    query,
-    where,
-    getDocs,
-} from "firebase/firestore";
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, addDoc, onSnapshot, collection, serverTimestamp, getDocs, updateDoc, query, where, deleteDoc } from 'firebase/firestore'; // Added deleteDoc
 
 // Global variables for Firebase configuration, provided by the Canvas environment
-// Cấu hình Firebase đọc từ biến môi trường (sau khi triển khai)
-const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID,
-    // measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID, // Bỏ comment nếu bạn có measurementId
+// Biến toàn cục cho cấu hình Firebase, được cung cấp bởi môi trường Canvas
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// Function to format numbers with commas for thousands
+// Hàm định dạng số với dấu phẩy
+const formatNumber = (num) => {
+    if (num === null || num === undefined || isNaN(num)) return '';
+    return num.toString().replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,');
 };
-
-console.log("Firebase Config loaded:", firebaseConfig);
-
-// appId cho đường dẫn Firestore của người dùng
-// Lấy projectId từ cấu hình Firebase, hoặc dùng fallback nếu không có
-const appId = firebaseConfig.projectId || "default-app-id"; // Dùng projectId làm appId để nhất quán với đường dẫn Firestore
-const initialAuthToken = null; // Token này chỉ dùng trong môi trường Canvas, không cần khi deploy thật
-
-console.log("App ID for Firestore paths:", appId);
 
 function App() {
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
     const [userId, setUserId] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [view, setView] = useState("detailedLedger"); // 'detailedLedger', 'stockCheck', or 'expenseLedger'
-    const [message, setMessage] = useState("");
+    const [view, setView] = useState('detailedLedger'); // 'detailedLedger', 'stockCheck', or 'expenseLedger'
+    const [message, setMessage] = useState('');
 
-    // State for Detailed Ledger (Sổ chi tiết)
+    // State for Detailed Ledger
+    // State cho Sổ chi tiết
     const [ledgerEntries, setLedgerEntries] = useState([]);
-    const [voucherNumber, setVoucherNumber] = useState("");
-    const [entryDate, setEntryDate] = useState(""); // DD-MM-YYYY
-    const [productName, setProductName] = useState("");
-    const [unit, setUnit] = useState("");
-    const [unitPrice, setUnitPrice] = useState("");
-    const [quantityIn, setQuantityIn] = useState("");
-    const [amountIn, setAmountIn] = useState(""); // Calculated field
-    const [quantityOut, setQuantityOut] = useState("");
-    const [amountOut, setAmountOut] = useState(""); // Calculated field
-    const [note, setNote] = useState("");
-    const [isSuggestingUnit, setIsSuggestingUnit] = useState(false); // New state for AI suggestion loading
+    const [voucherNumber, setVoucherNumber] = useState('');
+    const [entryDate, setEntryDate] = useState('');
+    const [productName, setProductName] = useState('');
+    const [unit, setUnit] = useState('');
+    const [unitPrice, setUnitPrice] = useState('');
+    const [quantityIn, setQuantityIn] = useState('');
+    const [amountIn, setAmountIn] = useState('');
+    const [quantityOut, setQuantityOut] = useState('');
+    const [amountOut, setAmountOut] = useState('');
+    const [note, setNote] = useState('');
+    const [isSuggestingUnit, setIsSuggestingUnit] = useState(false);
 
     // State for Stock Check
+    // State cho Kiểm tra Kho
     const [inventoryItems, setInventoryItems] = useState([]);
-    const [itemName, setItemName] = useState("");
-    const [unitOfMeasure, setUnitOfMeasure] = useState("");
-    const [unitCost, setUnitCost] = useState("");
-    const [lowStockThreshold, setLowStockThreshold] = useState("");
+    const [itemName, setItemName] = useState(''); // CORRECTED: Was a string literal, now a state variable
+    const [unitOfMeasure, setUnitOfMeasure] = useState(''); // CORRECTED: Was a string literal, now a state variable
+    const [unitCost, setUnitCost] = useState(''); // CORRECTED: Was a string literal, now a state variable
+    const [lowStockThreshold, setLowStockThreshold] = useState(''); // CORRECTED: Was a string literal, now a state variable
+    const [editingItemId, setEditingItemId] = useState(null); // New state for editing inventory item
 
-    // State for Expense Ledger (Sổ chi phí sản xuất, kinh doanh)
+    // State for Expense Ledger
+    // State cho Sổ chi phí
     const [expenseEntries, setExpenseEntries] = useState([]);
-    const [expenseEntryDate, setExpenseEntryDate] = useState(""); // DD-MM-YYYY
-    const [expenseVoucherNumber, setExpenseVoucherNumber] = useState("");
-    const [description, setDescription] = useState("");
-    const [totalAmount, setTotalAmount] = useState("");
-    const [expenseType, setExpenseType] = useState("");
+    const [expenseEntryDate, setExpenseEntryDate] = useState(''); 
+    const [expenseVoucherNumber, setExpenseVoucherNumber] = useState('');
+    const [description, setDescription] = useState('');
+    const [totalAmount, setTotalAmount] = useState('');
+    const [expenseType, setExpenseType] = useState('');
 
-    // Expense Categories for dropdown
+    // Expense Categories
+    // Các loại chi phí
     const expenseCategories = [
-        "", // Default empty option
-        "Chi phí nhập hàng",
-        "Chi phí nhân công",
-        "Chi phí điện",
-        "Chi phí nước",
-        "Chi phí viễn thông",
-        "Chi phí thuê kho bãi, mặt bằng kinh doanh",
+        "", "Chi phí nhập hàng", "Chi phí nhân công", "Chi phí điện", "Chi phí nước",
+        "Chi phí viễn thông", "Chi phí thuê kho bãi, mặt bằng kinh doanh",
         "Chi phí quản lí (văn phòng phẩm, công cụ, dụng cụ,...)",
-        "Chi phí khác (hội nghị, công tác phí, thanh lý, nhượng bán tài sản cố định, thuê ngoài khác,...)",
-        // New category added here
+        "Chi phí khác (hội nghị, công tác phí, thanh lý,...)"
     ];
 
-    // Firebase Initialization and Authentication
+    // Initialize Firebase and Authentication
+    // Khởi tạo Firebase và Xác thực
     useEffect(() => {
         try {
             const app = initializeApp(firebaseConfig);
             const firestore = getFirestore(app);
             const firebaseAuth = getAuth(app);
-
             setDb(firestore);
             setAuth(firebaseAuth);
 
-            // Listen for auth state changes
-            const unsubscribe = onAuthStateChanged(
-                firebaseAuth,
-                async (user) => {
-                    if (user) {
-                        setUserId(user.uid);
-                        setMessage(
-                            `Chào mừng bạn! ID người dùng của bạn: ${user.uid}`
-                        );
-                    } else {
-                        // Sign in anonymously if no token is provided or if the token has expired/is invalid.
-                        try {
-                            if (initialAuthToken) {
-                                await signInWithCustomToken(
-                                    firebaseAuth,
-                                    initialAuthToken
-                                );
-                            } else {
-                                await signInAnonymously(firebaseAuth);
-                            }
-                        } catch (error) {
-                            console.error("Lỗi xác thực Firebase:", error);
-                            setMessage(`Xác thực thất bại: ${error.message}`);
+            const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
+                if (user) {
+                    setUserId(user.uid);
+                    setMessage(`Chào mừng! ID của bạn: ${user.uid}`);
+                } else {
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(firebaseAuth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(firebaseAuth);
                         }
+                    } catch (error) {
+                        console.error("Lỗi xác thực Firebase:", error);
+                        setMessage(`Xác thực thất bại: ${error.message}`);
                     }
-                    setLoading(false);
                 }
-            );
+                setLoading(false);
+            });
 
-            return () => unsubscribe(); // Cleanup auth listener
+            return () => unsubscribe();
         } catch (error) {
             console.error("Không thể khởi tạo Firebase:", error);
             setMessage(`Không thể khởi tạo ứng dụng: ${error.message}`);
@@ -139,1269 +103,511 @@ function App() {
         }
     }, []);
 
-    // Firestore Real-time Listeners (Detailed Ledger, Inventory, and Expense Ledger)
+    // Real-time data listener from Firestore
+    // Listener dữ liệu thời gian thực từ Firestore
     useEffect(() => {
-        if (!db || !userId) {
-            return;
-        }
+        if (!db || !userId) return;
 
-        // Listener for Detailed Ledger (Sổ chi tiết)
-        const detailedLedgerCollectionRef = collection(
-            db,
-            `artifacts/${appId}/users/${userId}/detailedLedger`
-        );
-        const unsubscribeDetailedLedger = onSnapshot(
-            detailedLedgerCollectionRef,
-            (snapshot) => {
-                const fetchedEntries = snapshot.docs.map((doc) => ({
-                    id: doc.id,
-                    ...doc.data(),
-                }));
-                // Sort by date and then timestamp for consistency (newest first)
-                fetchedEntries.sort((a, b) => {
-                    // Primary sort by date descending
-                    if (a.entryDate < b.entryDate) return 1;
-                    if (a.entryDate > b.entryDate) return -1;
-                    // Secondary sort by timestamp descending if dates are the same
-                    if (a.timestamp && b.timestamp) {
-                        return b.timestamp.toMillis() - a.timestamp.toMillis();
-                    }
-                    return 0;
-                });
-                setLedgerEntries(fetchedEntries);
-            },
-            (error) => {
-                console.error("Lỗi khi lấy sổ chi tiết:", error);
-                setMessage(`Lỗi khi tải sổ chi tiết: ${error.message}`);
-            }
-        );
+        // Listener for Detailed Ledger
+        // Listener cho Sổ Chi Tiết
+        const detailedLedgerCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/detailedLedger`);
+        const unsubscribeDetailedLedger = onSnapshot(detailedLedgerCollectionRef, (snapshot) => {
+            const fetchedEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            fetchedEntries.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0));
+            setLedgerEntries(fetchedEntries);
+        }, (error) => console.error("Lỗi lấy sổ chi tiết:", error));
 
-        // Listener for Inventory Items
-        const inventoryCollectionRef = collection(
-            db,
-            `artifacts/${appId}/users/${userId}/inventory`
-        );
-        const unsubscribeInventory = onSnapshot(
-            inventoryCollectionRef,
-            (snapshot) => {
-                const fetchedInventory = snapshot.docs.map((doc) => ({
-                    id: doc.id,
-                    ...doc.data(),
-                }));
-                setInventoryItems(fetchedInventory);
-            },
-            (error) => {
-                console.error("Lỗi khi lấy tồn kho:", error);
-                setMessage(`Lỗi khi tải tồn kho: ${error.message}`);
-            }
-        );
+        // Listener for Inventory
+        // Listener cho Kho
+        const inventoryCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/inventory`);
+        const unsubscribeInventory = onSnapshot(inventoryCollectionRef, (snapshot) => {
+            const fetchedInventory = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setInventoryItems(fetchedInventory);
+        }, (error) => console.error("Lỗi lấy tồn kho:", error));
 
-        // Listener for Expense Ledger (Sổ chi phí)
-        const expenseLedgerCollectionRef = collection(
-            db,
-            `artifacts/${appId}/users/${userId}/expenseLedger`
-        );
-        const unsubscribeExpenseLedger = onSnapshot(
-            expenseLedgerCollectionRef,
-            (snapshot) => {
-                const fetchedExpenses = snapshot.docs.map((doc) => ({
-                    id: doc.id,
-                    ...doc.data(),
-                }));
-                // Sort by date and then timestamp for consistency (newest first)
-                fetchedExpenses.sort((a, b) => {
-                    if (a.expenseEntryDate < b.expenseEntryDate) return 1;
-                    if (a.expenseEntryDate > b.expenseEntryDate) return -1;
-                    if (a.timestamp && b.timestamp) {
-                        return b.timestamp.toMillis() - a.timestamp.toMillis();
-                    }
-                    return 0;
-                });
-                setExpenseEntries(fetchedExpenses);
-            },
-            (error) => {
-                console.error("Lỗi khi lấy sổ chi phí:", error);
-                setMessage(`Lỗi khi tải sổ chi phí: ${error.message}`);
-            }
-        );
+        // Listener for Expense Ledger
+        // Listener cho Sổ Chi Phí
+        const expenseLedgerCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/expenseLedger`);
+        const unsubscribeExpenseLedger = onSnapshot(expenseLedgerCollectionRef, (snapshot) => {
+            const fetchedExpenses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            fetchedExpenses.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0));
+            setExpenseEntries(fetchedExpenses);
+        }, (error) => console.error("Lỗi lấy sổ chi phí:", error));
 
-        // Cleanup listeners
         return () => {
             unsubscribeDetailedLedger();
             unsubscribeInventory();
             unsubscribeExpenseLedger();
         };
-    }, [db, userId]); // Re-run effect if db or userId changes
+    }, [db, userId, appId]);
 
-    // Function to generate a random string of 3 uppercase letters
+    // Function to generate random letters for voucher number
+    // Hàm tạo mã ngẫu nhiên
     const generateRandomLetters = () => {
-        let result = "";
-        const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let result = '';
+        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
         for (let i = 0; i < 3; i++) {
-            result += characters.charAt(
-                Math.floor(Math.random() * characters.length)
-            );
+            result += characters.charAt(Math.floor(Math.random() * characters.length));
         }
         return result;
     };
 
-    // Helper to clear detailed ledger form fields and generate voucher number
+    // Function to clear the form and generate a new voucher number
+    // Hàm xóa form và tạo mã chứng từ mới
     const clearDetailedLedgerForm = () => {
         const today = new Date();
         const year = today.getFullYear();
-        const month = String(today.getMonth() + 1).padStart(2, "0");
-        const day = String(today.getDate()).padStart(2, "0");
-
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
         const formattedDate = `${day}${month}${year}`;
         const randomLetters = generateRandomLetters();
-        const newVoucherNumber = `${formattedDate}-${randomLetters}`;
-
-        setVoucherNumber(newVoucherNumber);
+        setVoucherNumber(`${formattedDate}-${randomLetters}`);
         setEntryDate(`${year}-${month}-${day}`);
-        setProductName("");
-        setUnit("");
-        setUnitPrice("");
-        setQuantityIn("");
-        setAmountIn("");
-        setQuantityOut("");
-        setAmountOut("");
-        setNote("");
+        setProductName(''); setUnit(''); setUnitPrice('');
+        setQuantityIn(''); setAmountIn(''); setQuantityOut('');
+        setAmountOut(''); setNote('');
     };
 
-    // Helper to clear inventory form fields
     const clearInventoryForm = () => {
-        setItemName("");
-        setUnitOfMeasure("");
-        setUnitCost("");
-        setLowStockThreshold("");
+        setItemName(''); setUnitOfMeasure(''); setUnitCost(''); setLowStockThreshold('');
+        setEditingItemId(null); // Clear editing state when form is cleared
     };
 
-    // Helper to clear expense form fields and generate voucher number
     const clearExpenseForm = () => {
         const today = new Date();
         const year = today.getFullYear();
-        const month = String(today.getMonth() + 1).padStart(2, "0");
-        const day = String(today.getDate()).padStart(2, "0");
-
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
         const formattedDate = `${day}${month}${year}`;
         const randomLetters = generateRandomLetters();
-        const newExpenseVoucherNumber = `${formattedDate}-${randomLetters}-CP`; // CP for Chi Phí
-
+        setExpenseVoucherNumber(`${formattedDate}-${randomLetters}-CP`);
         setExpenseEntryDate(`${year}-${month}-${day}`);
-        setExpenseVoucherNumber(newExpenseVoucherNumber);
-        setDescription("");
-        setTotalAmount("");
-        setExpenseType(""); // Reset dropdown to default
+        setDescription(''); setTotalAmount(''); setExpenseType('');
     };
 
-    // Initialize forms on component mount or view change
+    // Initialize forms when switching views
+    // Khởi tạo form khi chuyển view
     useEffect(() => {
         clearDetailedLedgerForm();
         clearInventoryForm();
-        clearExpenseForm(); // Clear expense form on view change
-    }, [view]); // Clear forms when view changes
+        clearExpenseForm();
+    }, [view]);
 
-    // Calculate Thành tiền nhập/xuất when quantity or unit price changes
+    // Automatically calculate Amount In/Out
+    // Tự động tính Thành tiền
     useEffect(() => {
-        const price = parseFloat(unitPrice || 0);
-        const qIn = parseFloat(quantityIn || 0);
-        const qOut = parseFloat(quantityOut || 0);
-        setAmountIn(isNaN(qIn * price) ? "" : (qIn * price).toFixed(0));
-        setAmountOut(isNaN(qOut * price) ? "" : (qOut * price).toFixed(0));
+        const price = parseFloat(unitPrice) || 0;
+        const qIn = parseFloat(quantityIn) || 0;
+        const qOut = parseFloat(quantityOut) || 0;
+        setAmountIn(qIn * price);
+        setAmountOut(qOut * price);
     }, [quantityIn, quantityOut, unitPrice]);
 
-    // Handle AI unit suggestion
+    // AI Unit Suggestion
+    // Gợi ý đơn vị tính bằng AI
     const handleSuggestUnit = async () => {
         if (!productName) {
-            setMessage(
-                "Vui lòng nhập Tên sản phẩm trước khi gợi ý đơn vị tính."
-            );
+            setMessage("Vui lòng nhập Tên sản phẩm.");
             return;
         }
         setIsSuggestingUnit(true);
-        setMessage("Đang gợi ý đơn vị tính bằng AI...");
-
+        setMessage("AI đang gợi ý đơn vị tính...");
         try {
-            const chatHistory = [];
-            chatHistory.push({
-                role: "user",
-                parts: [
-                    {
-                        text: `Gợi ý đơn vị tính phổ biến nhất cho sản phẩm '${productName}' (ví dụ: kg, lít, cái, gói, chai, hộp). Chỉ trả lời một từ duy nhất, không kèm giải thích.`,
-                    },
-                ],
-            });
+            const chatHistory = [{ role: "user", parts: [{ text: `Gợi ý đơn vị tính phổ biến nhất cho sản phẩm '${productName}' (ví dụ: kg, lít, cái, gói, chai, hộp). Chỉ trả lời một từ duy nhất, không kèm giải thích.` }] }];
             const payload = { contents: chatHistory };
-            const apiKey = ""; // API key will be provided by Canvas runtime if empty
+            // The API key is handled by the Canvas environment for Gemini API calls.
+            // API key được xử lý bởi môi trường Canvas cho các cuộc gọi Gemini API.
+            const apiKey = "";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-            const response = await fetch(apiUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             const result = await response.json();
-
-            if (
-                result.candidates &&
-                result.candidates.length > 0 &&
-                result.candidates[0].content &&
-                result.candidates[0].content.parts &&
-                result.candidates[0].content.parts.length > 0
-            ) {
-                const suggestedUnit = result.candidates[0].content.parts[0].text
-                    .trim()
-                    .toLowerCase();
+            if (result.candidates && result.candidates[0]?.content?.parts?.[0]) {
+                const suggestedUnit = result.candidates[0].content.parts[0].text.trim().toLowerCase();
                 setUnit(suggestedUnit);
-                setMessage(`Đã gợi ý đơn vị tính: ${suggestedUnit}`);
+                setMessage(`Đã gợi ý: ${suggestedUnit}`);
             } else {
-                setMessage("Không thể gợi ý đơn vị tính. Vui lòng thử lại.");
+                setMessage("Không thể gợi ý. Vui lòng thử lại.");
             }
         } catch (error) {
-            console.error("Lỗi khi gợi ý đơn vị tính bằng AI:", error);
-            setMessage(`Lỗi khi gợi ý đơn vị tính: ${error.message}`);
+            console.error("Lỗi AI:", error);
+            setMessage(`Lỗi khi gợi ý: ${error.message}`);
         } finally {
             setIsSuggestingUnit(false);
         }
     };
 
-    // Add Detailed Ledger Entry and Update Inventory
+    // Add entry to Detailed Ledger and update Inventory
+    // Thêm bút toán vào Sổ chi tiết và cập nhật Kho
     const handleAddLedgerEntry = async () => {
-        if (
-            !db ||
-            !userId ||
-            !voucherNumber ||
-            !entryDate ||
-            !productName ||
-            !unit ||
-            !unitPrice
-        ) {
-            setMessage(
-                "Vui lòng điền đầy đủ các trường bắt buộc cho Sổ chi tiết."
-            );
+        if (!db || !userId || !productName || !unit || !unitPrice) {
+            setMessage("Vui lòng điền các trường bắt buộc.");
             return;
         }
-
-        const actualQuantityIn = parseFloat(quantityIn || 0);
-        const actualQuantityOut = parseFloat(quantityOut || 0);
-
-        if (actualQuantityIn <= 0 && actualQuantityOut <= 0) {
-            setMessage(
-                "Vui lòng nhập Số lượng nhập hoặc Số lượng xuất lớn hơn 0."
-            );
+        const qIn = parseFloat(quantityIn) || 0;
+        const qOut = parseFloat(quantityOut) || 0;
+        if (qIn <= 0 && qOut <= 0) {
+            setMessage("Số lượng nhập hoặc xuất phải lớn hơn 0.");
             return;
         }
 
         const entryData = {
-            voucherNumber: voucherNumber,
-            entryDate: entryDate,
-            productName: productName,
-            unit: unit,
+            voucherNumber, entryDate, productName, unit,
             unitPrice: parseFloat(unitPrice),
-            quantityIn: actualQuantityIn,
-            amountIn: parseFloat(amountIn || 0),
-            amountOut: parseFloat(amountOut || 0),
-            note: note,
-            timestamp: serverTimestamp(),
+            quantityIn: qIn, amountIn: qIn * parseFloat(unitPrice),
+            quantityOut: qOut, amountOut: qOut * parseFloat(unitPrice),
+            note, timestamp: serverTimestamp()
         };
 
         try {
-            // 1. Add entry to Detailed Ledger
-            await addDoc(
-                collection(
-                    db,
-                    `artifacts/${appId}/users/${userId}/detailedLedger`
-                ),
-                entryData
-            );
-
-            // 2. Update Inventory based on this ledger entry
-            const inventoryCollectionRef = collection(
-                db,
-                `artifacts/${appId}/users/${userId}/inventory`
-            );
-            const q = query(
-                inventoryCollectionRef,
-                where("name", "==", productName)
-            );
+            await addDoc(collection(db, `artifacts/${appId}/users/${userId}/detailedLedger`), entryData);
+            const inventoryCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/inventory`);
+            const q = query(inventoryCollectionRef, where("name", "==", productName));
             const querySnapshot = await getDocs(q);
-
-            let newQuantityChange = actualQuantityIn - actualQuantityOut;
+            const quantityChange = qIn - qOut;
 
             if (!querySnapshot.empty) {
-                // Item exists, update its quantity
                 const docToUpdate = querySnapshot.docs[0];
-                const currentInventoryData = docToUpdate.data();
-                const currentInventoryQuantity =
-                    currentInventoryData.quantity || 0;
-                const updatedQuantity =
-                    currentInventoryQuantity + newQuantityChange;
-
-                // Also update unit and cost if they are different from existing inventory item (optional, for data consistency)
-                await updateDoc(
-                    doc(
-                        db,
-                        `artifacts/${appId}/users/${userId}/inventory`,
-                        docToUpdate.id
-                    ),
-                    {
-                        quantity: updatedQuantity,
-                        unit: unit, // Update unit if changed in ledger
-                        cost: parseFloat(unitPrice), // Update cost if changed in ledger
-                    }
-                );
-                setMessage(
-                    `Mục Sổ chi tiết đã được thêm thành công và tồn kho của '${productName}' đã cập nhật.`
-                );
+                const newQuantity = (docToUpdate.data().quantity || 0) + quantityChange;
+                await updateDoc(doc(db, `artifacts/${appId}/users/${userId}/inventory`, docToUpdate.id), {
+                    quantity: newQuantity, unit: unit, cost: parseFloat(unitPrice)
+                });
             } else {
-                // Item does not exist, create a new one in inventory
-                const newItem = {
-                    name: productName,
-                    quantity: newQuantityChange, // Initial quantity based on this first transaction
-                    unit: unit, // Use unit from ledger
-                    cost: parseFloat(unitPrice), // Use unitPrice from ledger as initial cost
-                    threshold: 1, // Default threshold for new items
-                    timestamp: serverTimestamp(),
-                };
-                await addDoc(inventoryCollectionRef, newItem);
-                setMessage(
-                    `Mục Sổ chi tiết đã được thêm thành công và '${productName}' đã được thêm vào tồn kho.`
-                );
+                await addDoc(inventoryCollectionRef, {
+                    name: productName, quantity: quantityChange, unit: unit,
+                    cost: parseFloat(unitPrice), threshold: 1, timestamp: serverTimestamp()
+                });
             }
-
+            setMessage(`'${productName}' đã được cập nhật thành công.`);
             clearDetailedLedgerForm();
         } catch (error) {
-            console.error(
-                "Lỗi khi thêm mục sổ chi tiết hoặc cập nhật tồn kho:",
-                error
-            );
+            console.error("Lỗi thêm bút toán:", error);
+            setMessage(`Lỗi: ${error.message}`);
+        }
+    };
+    
+    // Modified function to handle both adding and updating inventory items
+    // Hàm được sửa đổi để xử lý cả việc thêm và cập nhật các mặt hàng tồn kho
+    const handleSubmitInventoryItem = async () => {
+        if (!db || !userId || !itemName || !unitOfMeasure || !unitCost || !lowStockThreshold) {
+            setMessage("Vui lòng điền đầy đủ thông tin mặt hàng.");
+            return;
+        }
+
+        const itemData = {
+            name: itemName,
+            unit: unitOfMeasure,
+            cost: parseFloat(unitCost),
+            threshold: parseFloat(lowStockThreshold),
+        };
+
+        try {
+            const inventoryCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/inventory`);
+
+            if (editingItemId) {
+                // Update existing item
+                await updateDoc(doc(db, `artifacts/${appId}/users/${userId}/inventory`, editingItemId), itemData);
+                setMessage(`Đã cập nhật '${itemName}' thành công.`);
+            } else {
+                // Add new item - check for existing name only when adding new
+                const q = query(inventoryCollectionRef, where("name", "==", itemName));
+                const querySnapshot = await getDocs(q);
+                if (!querySnapshot.empty) {
+                    setMessage(`Mặt hàng '${itemName}' đã tồn tại. Vui lòng cập nhật thay vì thêm mới.`);
+                    return;
+                }
+                await addDoc(inventoryCollectionRef, {
+                    ...itemData,
+                    quantity: 0, // New items start with 0 quantity, updated via detailed ledger
+                    timestamp: serverTimestamp()
+                });
+                setMessage(`Đã thêm '${itemName}' vào kho.`);
+            }
+            clearInventoryForm(); // Clear form and editing state
+        } catch (error) {
+            console.error("Lỗi xử lý mặt hàng kho:", error);
             setMessage(`Lỗi: ${error.message}`);
         }
     };
 
-    // Add new Inventory Item (Now primarily for defining item metadata, quantity controlled by ledger)
-    const handleAddItem = async () => {
-        if (
-            !db ||
-            !userId ||
-            !itemName ||
-            !unitOfMeasure ||
-            !unitCost ||
-            !lowStockThreshold
-        ) {
-            setMessage(
-                "Vui lòng điền đầy đủ các trường để thêm mặt hàng tồn kho."
-            );
+    // Function to set item for editing
+    // Hàm mới để đặt mặt hàng cần chỉnh sửa
+    const handleEditItem = (item) => {
+        setItemName(item.name);
+        setUnitOfMeasure(item.unit);
+        setUnitCost(item.cost.toString());
+        setLowStockThreshold(item.threshold.toString());
+        setEditingItemId(item.id);
+        setMessage(`Đang chỉnh sửa: '${item.name}'`);
+    };
+
+    // Function to cancel editing
+    // Hàm mới để hủy chỉnh sửa
+    const handleCancelEdit = () => {
+        clearInventoryForm();
+        setMessage('Đã hủy chỉnh sửa.');
+    };
+
+    // Function to delete an inventory item
+    // Hàm mới để xóa một mặt hàng tồn kho
+    const handleDeleteItem = async (id, name) => {
+        if (!db || !userId) {
+            setMessage("Lỗi: Không thể kết nối cơ sở dữ liệu.");
             return;
         }
-
-        // Check if item already exists
-        const inventoryCollectionRef = collection(
-            db,
-            `artifacts/${appId}/users/${userId}/inventory`
-        );
-        const q = query(inventoryCollectionRef, where("name", "==", itemName));
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-            setMessage(
-                `Mặt hàng '${itemName}' đã tồn tại trong kho. Vui lòng nhập qua Sổ Chi Tiết để điều chỉnh số lượng.`
-            );
-            return;
-        }
-
-        const newItem = {
-            name: itemName,
-            quantity: 0, // Quantity starts at 0, updated by ledger
-            unit: unitOfMeasure,
-            cost: parseFloat(unitCost),
-            threshold: parseFloat(lowStockThreshold),
-            timestamp: serverTimestamp(),
-        };
-
         try {
-            await addDoc(inventoryCollectionRef, newItem);
-            setMessage(
-                `Mặt hàng '${itemName}' đã được thêm vào kho (số lượng ban đầu là 0).`
-            );
-            clearInventoryForm();
+            await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/inventory`, id));
+            setMessage(`Đã xóa mặt hàng '${name}' khỏi kho.`);
         } catch (error) {
-            console.error("Lỗi khi thêm mặt hàng:", error);
-            setMessage(`Lỗi khi thêm mặt hàng: ${error.message}`);
+            console.error("Lỗi xóa mặt hàng:", error);
+            setMessage(`Lỗi khi xóa: ${error.message}`);
         }
     };
 
-    // Add Expense Ledger Entry
+    // Add expense entry
+    // Thêm bút toán chi phí
     const handleAddExpenseEntry = async () => {
-        if (
-            !db ||
-            !userId ||
-            !expenseEntryDate ||
-            !expenseVoucherNumber ||
-            !description ||
-            !totalAmount ||
-            !expenseType
-        ) {
-            setMessage(
-                "Vui lòng điền đầy đủ các trường bắt buộc cho Sổ chi phí."
-            );
+        if (!db || !userId || !description || !totalAmount || !expenseType) {
+            setMessage("Vui lòng điền đầy đủ các trường chi phí.");
             return;
         }
         if (parseFloat(totalAmount) <= 0) {
             setMessage("Tổng số tiền phải lớn hơn 0.");
             return;
         }
-
-        const expenseData = {
-            expenseEntryDate: expenseEntryDate,
-            expenseVoucherNumber: expenseVoucherNumber,
-            description: description,
-            totalAmount: parseFloat(totalAmount),
-            expenseType: expenseType,
-            timestamp: serverTimestamp(),
-        };
-
         try {
-            await addDoc(
-                collection(
-                    db,
-                    `artifacts/${appId}/users/${userId}/expenseLedger`
-                ),
-                expenseData
-            );
-            setMessage(`Mục Sổ chi phí đã được thêm thành công!`);
+            await addDoc(collection(db, `artifacts/${appId}/users/${userId}/expenseLedger`), {
+                expenseEntryDate, expenseVoucherNumber, description,
+                totalAmount: parseFloat(totalAmount), expenseType,
+                timestamp: serverTimestamp()
+            });
+            setMessage(`Đã thêm chi phí thành công.`);
             clearExpenseForm();
         } catch (error) {
-            console.error("Lỗi khi thêm mục sổ chi phí:", error);
-            setMessage(`Lỗi khi thêm mục sổ chi phí: ${error.message}`);
+            console.error("Lỗi thêm chi phí:", error);
+            setMessage(`Lỗi: ${error.message}`);
         }
     };
 
-    // Function to export ledger data to CSV
+    // Export data to CSV
+    // Xuất dữ liệu ra CSV
     const handleExportLedger = () => {
         if (ledgerEntries.length === 0) {
-            setMessage("Không có dữ liệu sổ chi tiết để xuất.");
+            setMessage("Không có dữ liệu để xuất.");
             return;
         }
-
-        const headers = [
-            "Số hiệu chứng từ",
-            "Ngày tháng",
-            "Tên sản phẩm",
-            "Đơn vị tính",
-            "Đơn giá",
-            "Số lượng nhập",
-            "Thành tiền nhập",
-            "Thành tiền xuất",
-            "Ghi chú",
-        ];
-
-        // Map data to match header order and format as CSV rows
-        const csvRows = ledgerEntries.map((entry) =>
-            [
-                entry.voucherNumber,
-                entry.entryDate,
-                entry.productName,
-                entry.unit,
-                entry.unitPrice.toFixed(0),
-                entry.quantityIn,
-                entry.amountIn.toFixed(0),
-                entry.quantityOut,
-                entry.amountOut.toFixed(0),
-                entry.note,
-            ]
-                .map((value) => `"${String(value).replace(/"/g, '""')}"`)
-                .join(",")
-        ); // Enclose values in quotes and escape internal quotes
-
-        const csvString = [
-            headers.map((header) => `"${header}"`).join(","), // Enclose headers in quotes
-            ...csvRows,
-        ].join("\n");
-
-        const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
-        const link = document.createElement("a");
+        const headers = ["Số hiệu CT", "Ngày", "Tên sản phẩm", "ĐVT", "Đơn giá", "SL nhập", "TT nhập", "SL xuất", "TT xuất", "Ghi chú"];
+        const csvRows = ledgerEntries.map(e => [e.voucherNumber, e.entryDate, e.productName, e.unit, e.unitPrice, e.quantityIn, e.amountIn, e.quantityOut, e.amountOut, e.note].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+        // Add BOM for proper UTF-8 handling in Excel
+        // Thêm BOM để xử lý UTF-8 đúng cách trong Excel
+        const csvString = [headers.join(','), ...csvRows].join('\n');
+        const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.setAttribute(
-            "download",
-            `so_chi_tiet_${new Date().toISOString().slice(0, 10)}.csv`
-        );
-        document.body.appendChild(link); // Append to body to ensure it's in the DOM
-        link.click(); // Programmatically click the link to trigger download
-        document.body.removeChild(link); // Clean up the DOM
-        setMessage("Dữ liệu sổ chi tiết đã được xuất thành công sang CSV!");
+        link.setAttribute('download', `so_chi_tiet_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setMessage("Xuất CSV thành công!");
     };
 
+
     if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-                <p className="text-xl">Đang tải ứng dụng...</p>
-            </div>
-        );
+        return <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white"><p>Đang tải ứng dụng...</p></div>;
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-purple-100 dark:from-gray-800 dark:to-gray-950 text-gray-900 dark:text-gray-100 font-inter p-4 sm:p-6 md:p-8 rounded-lg shadow-xl">
-            <div className="max-w-4xl mx-auto rounded-xl overflow-hidden shadow-2xl bg-white dark:bg-gray-800">
-                {/* Header and Navigation */}
-                <header className="bg-indigo-600 dark:bg-purple-900 p-4 rounded-t-xl">
-                    <h1 className="text-3xl font-bold text-white text-center mb-4">
-                        Happy Monkey Burger 🍔
-                    </h1>
-                    {userId && (
-                        <p className="text-sm text-center text-indigo-100 dark:text-purple-200 mb-4">
-                            ID người dùng của bạn:{" "}
-                            <span className="font-mono bg-indigo-700 dark:bg-purple-800 px-2 py-1 rounded-md">
-                                {userId}
-                            </span>
-                        </p>
-                    )}
-                    <nav className="flex justify-center space-x-4">
-                        <button
-                            onClick={() => setView("detailedLedger")}
-                            className={`px-6 py-2 rounded-full font-semibold transition-all duration-300 ${
-                                view === "detailedLedger"
-                                    ? "bg-white text-indigo-700 shadow-md transform scale-105"
-                                    : "bg-indigo-500 text-white hover:bg-indigo-400 dark:bg-purple-700 dark:hover:bg-purple-600"
-                            }`}
-                        >
-                            Sổ Chi Tiết
-                        </button>
-                        <button
-                            onClick={() => setView("stockCheck")}
-                            className={`px-6 py-2 rounded-full font-semibold transition-all duration-300 ${
-                                view === "stockCheck"
-                                    ? "bg-white text-indigo-700 shadow-md transform scale-105"
-                                    : "bg-indigo-500 text-white hover:bg-indigo-400 dark:bg-purple-700 dark:hover:bg-purple-600"
-                            }`}
-                        >
-                            Kiểm Tra Kho
-                        </button>
-                        <button
-                            onClick={() => setView("expenseLedger")}
-                            className={`px-6 py-2 rounded-full font-semibold transition-all duration-300 ${
-                                view === "expenseLedger"
-                                    ? "bg-white text-indigo-700 shadow-md transform scale-105"
-                                    : "bg-indigo-500 text-white hover:bg-indigo-400 dark:bg-purple-700 dark:hover:bg-purple-600"
-                            }`}
-                        >
-                            Sổ Chi Phí
-                        </button>
+        <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-4 sm:p-6 font-sans">
+            <div className="max-w-7xl mx-auto bg-white dark:bg-gray-800 rounded-lg shadow-2xl">
+                {/* Header */}
+                {/* Tiêu đề */}
+                <header className="bg-indigo-600 dark:bg-gray-950 p-4 rounded-t-lg shadow-md">
+                    <h1 className="text-3xl font-bold text-white text-center mb-2">Sổ Kế Toán Mini 🍔</h1>
+                    {userId && <p className="text-xs text-center text-indigo-200 dark:text-gray-400">ID: <span className="font-mono">{userId}</span></p>}
+                    <nav className="flex justify-center space-x-2 sm:space-x-4 mt-4">
+                        {['detailedLedger', 'stockCheck', 'expenseLedger'].map(v => (
+                            <button key={v} onClick={() => setView(v)}
+                                className={`px-3 sm:px-6 py-2 rounded-full font-semibold text-sm sm:text-base transition-all duration-300 ${
+                                    view === v ? 'bg-white text-indigo-700 shadow-lg transform scale-105' : 'bg-indigo-500 text-white hover:bg-indigo-400 dark:bg-gray-700 dark:hover:bg-gray-600'
+                                }`}>
+                                {v === 'detailedLedger' ? 'Sổ Chi Tiết' : v === 'stockCheck' ? 'Kiểm Kho' : 'Sổ Chi Phí'}
+                            </button>
+                        ))}
                     </nav>
                 </header>
 
                 {/* Message Display */}
-                {message && (
-                    <div className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 p-3 m-4 rounded-md text-center shadow-inner">
-                        {message}
-                    </div>
-                )}
+                {/* Hiển thị thông báo */}
+                {message && <div className="bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 p-3 m-4 rounded-md text-center shadow-inner">{message}</div>}
 
-                {/* Main Content Area */}
-                <main className="p-4 sm:p-6 md:p-8">
-                    {view === "detailedLedger" && (
-                        <div className="space-y-8">
-                            <h2 className="text-2xl font-bold text-indigo-700 dark:text-purple-400 text-center">
-                                Sổ Chi Tiết
-                            </h2>
-
-                            {/* Detailed Ledger Input Form */}
-                            <section className="bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-600">
-                                <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-                                    Ghi Sổ Chi Tiết Mới
-                                </h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                                    <div>
-                                        <label
-                                            htmlFor="voucherNumber"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Số hiệu chứng từ
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="voucherNumber"
-                                            value={voucherNumber}
-                                            readOnly // Make it read-only as it's auto-generated
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white bg-gray-200 dark:bg-gray-700"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="entryDate"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Ngày tháng
-                                        </label>
-                                        <input
-                                            type="date"
-                                            id="entryDate"
-                                            value={entryDate}
-                                            onChange={(e) =>
-                                                setEntryDate(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="productName"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Tên sản phẩm
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="productName"
-                                            value={productName}
-                                            onChange={(e) =>
-                                                setProductName(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            required
-                                        />
-                                    </div>
+                {/* Main Content */}
+                {/* Nội dung chính */}
+                <main className="p-4 sm:p-6">
+                    {/* VIEW: DETAILED LEDGER */}
+                    {/* CHẾ ĐỘ XEM: SỔ CHI TIẾT */}
+                    {view === 'detailedLedger' && (
+                        <div className="space-y-6">
+                            <section className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg shadow-md">
+                                <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Ghi Sổ Mới</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <input value={voucherNumber} readOnly placeholder="Số CT" className="w-full p-2 border border-gray-300 rounded-md bg-gray-200 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-300 focus:outline-none"/>
+                                    <input type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                    <input value={productName} onChange={e => setProductName(e.target.value)} placeholder="Tên sản phẩm*" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
                                     <div className="relative">
-                                        {" "}
-                                        {/* Added relative for button positioning */}
-                                        <label
-                                            htmlFor="unit"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Đơn vị tính
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="unit"
-                                            value={unit}
-                                            onChange={(e) =>
-                                                setUnit(e.target.value)
-                                            }
-                                            className="w-full p-2 pr-24 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            required
-                                        />
-                                        <button
-                                            onClick={handleSuggestUnit}
-                                            disabled={
-                                                isSuggestingUnit || !productName
-                                            } // Disable if suggesting or no product name
-                                            className="absolute right-1 top-7 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold py-1 px-2 rounded-md transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {isSuggestingUnit
-                                                ? "Đang gợi ý..."
-                                                : "Gợi ý ĐVT (AI)"}
+                                        <input value={unit} onChange={e => setUnit(e.target.value)} placeholder="ĐVT*" className="w-full p-2 pr-24 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                        <button onClick={handleSuggestUnit} disabled={isSuggestingUnit || !productName} className="absolute right-1 top-1/2 -translate-y-1/2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold py-1 px-2 rounded-md disabled:opacity-50 transition-colors duration-200">
+                                            {isSuggestingUnit ? '...' : 'AI Gợi ý'}
                                         </button>
                                     </div>
-                                    <div>
-                                        <label
-                                            htmlFor="unitPrice"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Đơn giá
-                                        </label>
-                                        <input
-                                            type="number"
-                                            id="unitPrice"
-                                            value={unitPrice}
-                                            onChange={(e) =>
-                                                setUnitPrice(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            placeholder="0"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="quantityIn"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Số lượng nhập
-                                        </label>
-                                        <input
-                                            type="number"
-                                            id="quantityIn"
-                                            value={quantityIn}
-                                            onChange={(e) =>
-                                                setQuantityIn(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            placeholder="0"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="amountIn"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Thành tiền nhập
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="amountIn"
-                                            value={amountIn}
-                                            readOnly
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 dark:bg-gray-700 dark:border-gray-500 dark:text-gray-300"
-                                            placeholder="0"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="quantityOut"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Số lượng xuất
-                                        </label>
-                                        <input
-                                            type="number"
-                                            id="quantityOut"
-                                            value={quantityOut}
-                                            onChange={(e) =>
-                                                setQuantityOut(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            placeholder="0"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="amountOut"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Thành tiền xuất
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="amountOut"
-                                            value={amountOut}
-                                            readOnly
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 dark:bg-gray-700 dark:border-gray-500 dark:text-gray-300"
-                                            placeholder="0"
-                                        />
-                                    </div>
-                                    <div className="lg:col-span-3">
-                                        <label
-                                            htmlFor="note"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Ghi chú
-                                        </label>
-                                        <textarea
-                                            id="note"
-                                            value={note}
-                                            onChange={(e) =>
-                                                setNote(e.target.value)
-                                            }
-                                            rows="2"
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                        ></textarea>
-                                    </div>
+                                    <input type="number" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} placeholder="Đơn giá*" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                    <input type="number" value={quantityIn} onChange={e => setQuantityIn(e.target.value)} placeholder="SL Nhập" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                    <input type="number" value={quantityOut} onChange={e => setQuantityOut(e.target.value)} placeholder="SL Xuất" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                    <input value={note} onChange={e => setNote(e.target.value)} placeholder="Ghi chú" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
                                 </div>
-                                <button
-                                    onClick={handleAddLedgerEntry}
-                                    className="mt-8 w-full bg-indigo-600 hover:bg-indigo-700 dark:bg-purple-700 dark:hover:bg-purple-800 text-white font-bold py-3 px-6 rounded-full shadow-lg transition duration-300 ease-in-out transform hover:-translate-y-1 hover:scale-105"
-                                >
-                                    Thêm Mục Sổ Chi Tiết
-                                </button>
-                            </section>
-
-                            {/* Past Detailed Ledger Entries List */}
-                            <section className="mt-8 bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-600">
-                                <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4 text-center">
-                                    Các Mục Sổ Chi Tiết Đã Ghi
-                                </h3>
-                                {ledgerEntries.length === 0 ? (
-                                    <p className="text-gray-600 dark:text-gray-400 text-center">
-                                        Chưa có mục sổ chi tiết nào được ghi.
-                                    </p>
-                                ) : (
-                                    <>
-                                        <button
-                                            onClick={handleExportLedger}
-                                            className="mb-4 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-full shadow-md transition duration-300 ease-in-out transform hover:scale-105"
-                                        >
-                                            Xuất CSV Sổ Chi Tiết
-                                        </button>
-                                        <div className="overflow-x-auto">
-                                            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-                                                <thead className="bg-gray-100 dark:bg-gray-600">
-                                                    <tr>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            Số chứng từ
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            Ngày tháng
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            Tên SP
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            ĐVT
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            Đơn giá
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            SL Nhập
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            Thành tiền Nhập
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            SL Xuất
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            Thành tiền Xuất
-                                                        </th>
-                                                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                            Ghi chú
-                                                        </th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="bg-white dark:bg-gray-700 divide-y divide-gray-200 dark:divide-gray-600">
-                                                    {ledgerEntries.map(
-                                                        (entry) => (
-                                                            <tr
-                                                                key={entry.id}
-                                                                className="hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-                                                            >
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
-                                                                    {
-                                                                        entry.voucherNumber
-                                                                    }
-                                                                </td>
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                    {
-                                                                        entry.entryDate
-                                                                    }
-                                                                </td>
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                    {
-                                                                        entry.productName
-                                                                    }
-                                                                </td>
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                    {entry.unit}
-                                                                </td>
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                    {entry.unitPrice.toFixed(
-                                                                        0
-                                                                    )}{" "}
-                                                                    VND
-                                                                </td>
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                    {
-                                                                        entry.quantityIn
-                                                                    }
-                                                                </td>
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                    {entry.amountIn.toFixed(
-                                                                        0
-                                                                    )}{" "}
-                                                                    VND
-                                                                </td>
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                    {
-                                                                        entry.quantityOut
-                                                                    }
-                                                                </td>
-                                                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                    {entry.amountOut.toFixed(
-                                                                        0
-                                                                    )}{" "}
-                                                                    VND
-                                                                </td>
-                                                                <td className="px-4 py-2 text-sm text-gray-800 dark:text-gray-200 max-w-xs overflow-hidden text-ellipsis">
-                                                                    {entry.note}
-                                                                </td>
-                                                            </tr>
-                                                        )
-                                                    )}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </>
-                                )}
-                            </section>
-                        </div>
-                    )}
-
-                    {view === "stockCheck" && (
-                        <div className="space-y-8">
-                            <h2 className="text-2xl font-bold text-indigo-700 dark:text-purple-400 text-center">
-                                Kiểm Tra Kho (Tồn kho)
-                            </h2>
-
-                            {/* Add New Item Form (now just for defining item metadata, quantity controlled by ledger) */}
-                            <section className="bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-600">
-                                <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-                                    Thêm Mặt Hàng Tồn Kho Mới (để theo dõi)
-                                </h3>
-                                <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm">
-                                    Sử dụng phần này để thêm mặt hàng mới vào
-                                    danh sách theo dõi tồn kho. Số lượng hiện
-                                    tại sẽ được cập nhật tự động thông qua các
-                                    giao dịch trong Sổ Chi Tiết.
-                                </p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                                    <div>
-                                        <label
-                                            htmlFor="itemName"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Tên mặt hàng
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="itemName"
-                                            value={itemName}
-                                            onChange={(e) =>
-                                                setItemName(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            placeholder="ví dụ: Thịt bò xay (100g)"
-                                            required
-                                        />
-                                    </div>
-                                    {/* Removed currentQuantity input as it's now ledger-controlled */}
-                                    <div>
-                                        <label
-                                            htmlFor="unitOfMeasure"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Đơn vị tính
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="unitOfMeasure"
-                                            value={unitOfMeasure}
-                                            onChange={(e) =>
-                                                setUnitOfMeasure(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            placeholder="ví dụ: kg, cái, gói"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="unitCost"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Chi phí đơn vị
-                                        </label>
-                                        <input
-                                            type="number"
-                                            id="unitCost"
-                                            value={unitCost}
-                                            onChange={(e) =>
-                                                setUnitCost(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            placeholder="0"
-                                            required
-                                        />
-                                    </div>
-                                    <div className="sm:col-span-2">
-                                        <label
-                                            htmlFor="lowStockThreshold"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Ngưỡng tồn kho thấp
-                                        </label>
-                                        <input
-                                            type="number"
-                                            id="lowStockThreshold"
-                                            value={lowStockThreshold}
-                                            onChange={(e) =>
-                                                setLowStockThreshold(
-                                                    e.target.value
-                                                )
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            placeholder="ví dụ: 10"
-                                            required
-                                        />
-                                    </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                                    <p className="text-sm p-2 bg-gray-100 dark:bg-gray-700 rounded-md text-gray-800 dark:text-gray-200">TT Nhập: <span className="font-bold">{formatNumber(amountIn)}</span></p>
+                                    <p className="text-sm p-2 bg-gray-100 dark:bg-gray-700 rounded-md text-gray-800 dark:text-gray-200">TT Xuất: <span className="font-bold">{formatNumber(amountOut)}</span></p>
                                 </div>
-                                <button
-                                    onClick={handleAddItem}
-                                    className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 dark:bg-purple-700 dark:hover:bg-purple-800 text-white font-bold py-3 px-6 rounded-full shadow-lg transition duration-300 ease-in-out transform hover:-translate-y-1 hover:scale-105"
-                                >
-                                    Thêm Mặt Hàng Mới (tồn kho ban đầu 0)
-                                </button>
+                                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 mt-4">
+                                    <button onClick={handleAddLedgerEntry} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 shadow-lg">Thêm Bút Toán</button>
+                                    <button onClick={handleExportLedger} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 shadow-lg">Xuất CSV</button>
+                                </div>
                             </section>
-
-                            {/* Inventory List */}
-                            <section className="mt-8 bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-600">
-                                <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4 text-center">
-                                    Tồn Kho Hiện Tại
-                                </h3>
-                                {inventoryItems.length === 0 ? (
-                                    <p className="text-gray-600 dark:text-gray-400 text-center">
-                                        Chưa có mặt hàng tồn kho nào được thêm
-                                        hoặc được ghi nhận từ sổ chi tiết.
-                                    </p>
-                                ) : (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {inventoryItems.map((item) => (
-                                            <div
-                                                key={item.id}
-                                                className={`p-4 rounded-lg shadow-md transition-all duration-200
-                                                    ${
-                                                        item.quantity <
-                                                        item.threshold
-                                                            ? "bg-red-100 dark:bg-red-800 border-red-400 dark:border-red-600 ring-2 ring-red-500" // Highlight for low stock
-                                                            : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600"
-                                                    }`}
-                                            >
-                                                <h4 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">
-                                                    {item.name}
-                                                </h4>
-                                                <p className="text-gray-700 dark:text-gray-300">
-                                                    Số lượng:{" "}
-                                                    <span className="font-semibold">
-                                                        {item.quantity}{" "}
-                                                        {item.unit}
-                                                    </span>
-                                                </p>
-                                                <p className="text-gray-700 dark:text-gray-300">
-                                                    Chi phí đơn vị:{" "}
-                                                    <span className="font-semibold">
-                                                        {(
-                                                            item.cost || 0
-                                                        ).toFixed(0)}{" "}
-                                                        VND
-                                                    </span>
-                                                </p>
-                                                <p className="text-gray-700 dark:text-gray-300 mb-4">
-                                                    Ngưỡng tồn kho thấp:{" "}
-                                                    <span className="font-semibold">
-                                                        {item.threshold}{" "}
-                                                        {item.unit}
-                                                    </span>
-                                                </p>
-                                                {item.quantity <
-                                                    item.threshold && (
-                                                    <p className="text-red-600 dark:text-red-300 font-bold mb-3">
-                                                        TỒN KHO THẤP! Cần đặt
-                                                        hàng lại sớm.
-                                                    </p>
-                                                )}
-
-                                                <p className="text-gray-500 dark:text-gray-400 text-sm italic">
-                                                    Điều chỉnh số lượng qua Sổ
-                                                    Chi Tiết.
-                                                </p>
-                                            </div>
+                            
+                            <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+                                <table className="min-w-full text-sm text-left text-gray-500 dark:text-gray-400">
+                                    <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
+                                        <tr>
+                                            <th scope="col" className="px-4 py-3">Ngày</th>
+                                            <th scope="col" className="px-4 py-3">Sản phẩm</th>
+                                            <th scope="col" className="px-4 py-3 text-right">ĐG</th>
+                                            <th scope="col" className="px-4 py-3 text-right">SL Nhập</th>
+                                            <th scope="col" className="px-4 py-3 text-right">SL Xuất</th>
+                                            <th scope="col" className="px-4 py-3">Ghi chú</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {ledgerEntries.map(entry => (
+                                            <tr key={entry.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
+                                                <td className="px-4 py-2">{entry.entryDate}</td>
+                                                <td className="px-4 py-2 font-medium text-gray-900 dark:text-white">{entry.productName}</td>
+                                                <td className="px-4 py-2 text-right">{formatNumber(entry.unitPrice)}</td>
+                                                <td className="px-4 py-2 text-right text-green-500">{entry.quantityIn > 0 ? formatNumber(entry.quantityIn) : ''}</td>
+                                                <td className="px-4 py-2 text-right text-red-500">{entry.quantityOut > 0 ? formatNumber(entry.quantityOut) : ''}</td>
+                                                <td className="px-4 py-2">{entry.note}</td>
+                                            </tr>
                                         ))}
-                                    </div>
-                                )}
-                            </section>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     )}
 
-                    {view === "expenseLedger" && (
-                        <div className="space-y-8">
-                            <h2 className="text-2xl font-bold text-indigo-700 dark:text-purple-400 text-center">
-                                Sổ Chi Phí Sản Xuất, Kinh Doanh
-                            </h2>
+                    {/* VIEW: STOCK CHECK */}
+                    {/* CHẾ ĐỘ XEM: KIỂM KHO */}
+                    {view === 'stockCheck' && (
+                           <div className="space-y-6">
+                                <section className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg shadow-md">
+                                    <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">
+                                        {editingItemId ? 'Cập Nhật Thông Tin Mặt Hàng' : 'Thêm Mặt Hàng Mới (Định nghĩa)'}
+                                    </h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                            <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="Tên mặt hàng*" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent" readOnly={editingItemId !== null}/> {/* Item name is read-only when editing */}
+                                            <input value={unitOfMeasure} onChange={e => setUnitOfMeasure(e.target.value)} placeholder="ĐVT*" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                            <input type="number" value={unitCost} onChange={e => setUnitCost(e.target.value)} placeholder="Giá vốn*" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                            <input type="number" value={lowStockThreshold} onChange={e => setLowStockThreshold(e.target.value)} placeholder="Ngưỡng báo tồn kho*" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 mt-4">
+                                        <button onClick={handleSubmitInventoryItem} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 shadow-lg">
+                                            {editingItemId ? 'Cập Nhật Mặt Hàng' : 'Thêm Mặt Hàng'}
+                                        </button>
+                                        {editingItemId && (
+                                            <button onClick={handleCancelEdit} className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 shadow-lg">
+                                                Hủy
+                                            </button>
+                                        )}
+                                    </div>
+                                </section>
 
-                            {/* Expense Ledger Input Form */}
-                            <section className="bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-600">
-                                <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-                                    Ghi Sổ Chi Phí Mới
-                                </h3>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                                    <div>
-                                        <label
-                                            htmlFor="expenseEntryDate"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Ngày tháng năm ghi sổ
-                                        </label>
-                                        <input
-                                            type="date"
-                                            id="expenseEntryDate"
-                                            value={expenseEntryDate}
-                                            onChange={(e) =>
-                                                setExpenseEntryDate(
-                                                    e.target.value
-                                                )
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="expenseVoucherNumber"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Số hiệu chứng từ
-                                        </label>
-                                        <input
-                                            type="text"
-                                            id="expenseVoucherNumber"
-                                            value={expenseVoucherNumber}
-                                            readOnly // Auto-generated
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm bg-gray-200 dark:bg-gray-700 dark:border-gray-500 dark:text-gray-300"
-                                        />
-                                    </div>
-                                    <div className="sm:col-span-2">
-                                        <label
-                                            htmlFor="description"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Diễn giải
-                                        </label>
-                                        <textarea
-                                            id="description"
-                                            value={description}
-                                            onChange={(e) =>
-                                                setDescription(e.target.value)
-                                            }
-                                            rows="2"
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            required
-                                        ></textarea>
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="totalAmount"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Tổng số tiền
-                                        </label>
-                                        <input
-                                            type="number"
-                                            id="totalAmount"
-                                            value={totalAmount}
-                                            onChange={(e) =>
-                                                setTotalAmount(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            placeholder="0"
-                                            required
-                                        />
-                                    </div>
-                                    <div>
-                                        <label
-                                            htmlFor="expenseType"
-                                            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                                        >
-                                            Loại chi phí
-                                        </label>
-                                        <select
-                                            id="expenseType"
-                                            value={expenseType}
-                                            onChange={(e) =>
-                                                setExpenseType(e.target.value)
-                                            }
-                                            className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-600 dark:border-gray-500 dark:text-white"
-                                            required
-                                        >
-                                            {expenseCategories.map(
-                                                (category, index) => (
-                                                    <option
-                                                        key={index}
-                                                        value={category}
-                                                        disabled={
-                                                            category === ""
+                                <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+                                    <table className="min-w-full text-sm text-left text-gray-500 dark:text-gray-400">
+                                        <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
+                                            <tr>
+                                                <th scope="col" className="px-6 py-3">Tên mặt hàng</th>
+                                                <th scope="col" className="px-6 py-3 text-right">Số lượng tồn</th>
+                                                <th scope="col" className="px-6 py-3">ĐVT</th>
+                                                <th scope="col" className="px-6 py-3 text-right">Giá vốn</th>
+                                                <th scope="col" className="px-6 py-3 text-center">Trạng thái</th>
+                                                <th scope="col" className="px-6 py-3 text-center">Thao tác</th> {/* New column for actions */}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {inventoryItems.map(item => (
+                                                <tr key={item.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
+                                                    <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">{item.name}</td>
+                                                    <td className="px-6 py-4 text-right font-bold">{formatNumber(item.quantity)}</td>
+                                                    <td className="px-6 py-4">{item.unit}</td>
+                                                    <td className="px-6 py-4 text-right">{formatNumber(item.cost)}</td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        {item.quantity <= item.threshold ? 
+                                                            <span className="px-2 py-1 font-semibold text-xs bg-red-200 text-red-800 rounded-full">Hết hàng</span> :
+                                                            <span className="px-2 py-1 font-semibold text-xs bg-green-200 text-green-800 rounded-full">Còn hàng</span>
                                                         }
-                                                    >
-                                                        {category === ""
-                                                            ? "Chọn loại chi phí"
-                                                            : category}
-                                                    </option>
-                                                )
-                                            )}
-                                        </select>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={handleAddExpenseEntry}
-                                    className="mt-8 w-full bg-indigo-600 hover:bg-indigo-700 dark:bg-purple-700 dark:hover:bg-purple-800 text-white font-bold py-3 px-6 rounded-full shadow-lg transition duration-300 ease-in-out transform hover:-translate-y-1 hover:scale-105"
-                                >
-                                    Thêm Mục Sổ Chi Phí
-                                </button>
-                            </section>
-
-                            {/* Past Expense Entries List */}
-                            <section className="mt-8 bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-600">
-                                <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4 text-center">
-                                    Các Mục Sổ Chi Phí Đã Ghi
-                                </h3>
-                                {expenseEntries.length === 0 ? (
-                                    <p className="text-gray-600 dark:text-gray-400 text-center">
-                                        Chưa có mục sổ chi phí nào được ghi.
-                                    </p>
-                                ) : (
-                                    <div className="overflow-x-auto">
-                                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
-                                            <thead className="bg-gray-100 dark:bg-gray-600">
-                                                <tr>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                        Ngày tháng
-                                                    </th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                        Số chứng từ
-                                                    </th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                        Diễn giải
-                                                    </th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                        Tổng số tiền
-                                                    </th>
-                                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                                        Loại chi phí
-                                                    </th>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        <div className="flex justify-center space-x-2">
+                                                            <button onClick={() => handleEditItem(item)} className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold">Sửa</button>
+                                                            <button onClick={() => handleDeleteItem(item.id, item.name)} className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 font-semibold">Xóa</button>
+                                                        </div>
+                                                    </td>
                                                 </tr>
-                                            </thead>
-                                            <tbody className="bg-white dark:bg-gray-700 divide-y divide-gray-200 dark:divide-gray-600">
-                                                {expenseEntries.map(
-                                                    (expense) => (
-                                                        <tr
-                                                            key={expense.id}
-                                                            className="hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-                                                        >
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
-                                                                {
-                                                                    expense.expenseEntryDate
-                                                                }
-                                                            </td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                {
-                                                                    expense.expenseVoucherNumber
-                                                                }
-                                                            </td>
-                                                            <td className="px-4 py-2 text-sm text-gray-800 dark:text-gray-200 max-w-xs overflow-hidden text-ellipsis">
-                                                                {
-                                                                    expense.description
-                                                                }
-                                                            </td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                {expense.totalAmount.toFixed(
-                                                                    0
-                                                                )}{" "}
-                                                                VND
-                                                            </td>
-                                                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-800 dark:text-gray-200">
-                                                                {
-                                                                    expense.expenseType
-                                                                }
-                                                            </td>
-                                                        </tr>
-                                                    )
-                                                )}
-                                            </tbody>
-                                        </table>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                           </div>
+                    )}
+                    
+                    {/* VIEW: EXPENSE LEDGER */}
+                    {/* CHẾ ĐỘ XEM: SỔ CHI PHÍ */}
+                    {view === 'expenseLedger' && (
+                           <div className="space-y-6">
+                                <section className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg shadow-md">
+                                    <h3 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Ghi Nhận Chi Phí Mới</h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                           <input value={expenseVoucherNumber} readOnly placeholder="Số CT" className="w-full p-2 border border-gray-300 rounded-md bg-gray-200 dark:bg-gray-700 dark:border-gray-600 text-gray-700 dark:text-gray-300 focus:outline-none"/>
+                                           <input type="date" value={expenseEntryDate} onChange={e => setExpenseEntryDate(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
+                                           <select value={expenseType} onChange={e => setExpenseType(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                                               {expenseCategories.map(cat => <option key={cat} value={cat}>{cat || "Chọn loại chi phí*"}</option>)}
+                                           </select>
+                                           <input value={description} onChange={e => setDescription(e.target.value)} placeholder="Diễn giải*" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent sm:col-span-2 lg:col-span-1"/>
+                                           <input type="number" value={totalAmount} onChange={e => setTotalAmount(e.target.value)} placeholder="Tổng số tiền*" className="w-full p-2 border border-gray-300 rounded-md dark:bg-gray-600 dark:border-gray-600 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"/>
                                     </div>
-                                )}
-                            </section>
-                        </div>
+                                    <button onClick={handleAddExpenseEntry} className="mt-4 w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200 shadow-lg">Thêm Chi Phí</button>
+                                </section>
+
+                                <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-lg shadow-lg">
+                                    <table className="min-w-full text-sm text-left text-gray-500 dark:text-gray-400">
+                                        <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
+                                            <tr>
+                                                <th scope="col" className="px-6 py-3">Ngày</th>
+                                                <th scope="col" className="px-6 py-3">Loại chi phí</th>
+                                                <th scope="col" className="px-6 py-3">Diễn giải</th>
+                                                <th scope="col" className="px-6 py-3 text-right">Số tiền</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {expenseEntries.map(expense => (
+                                                <tr key={expense.id} className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
+                                                    <td className="px-6 py-4">{expense.expenseEntryDate}</td>
+                                                    <td className="px-6 py-4">{expense.expenseType}</td>
+                                                    <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">{expense.description}</td>
+                                                    <td className="px-6 py-4 text-right font-bold">{formatNumber(expense.totalAmount)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                           </div>
                     )}
                 </main>
             </div>
