@@ -3,11 +3,27 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, addDoc, onSnapshot, collection, serverTimestamp, getDocs, updateDoc, query, where, deleteDoc } from 'firebase/firestore'; // Added deleteDoc
 
-// Global variables for Firebase configuration, provided by the Canvas environment
-// Biến toàn cục cho cấu hình Firebase, được cung cấp bởi môi trường Canvas
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+// Cấu hình Firebase đọc từ biến môi trường (sau khi triển khai)
+const firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+    // measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID, // Bỏ comment nếu bạn có measurementId
+};
+
+// Log cấu hình Firebase để kiểm tra
+console.log("Firebase Config loaded:", firebaseConfig);
+
+// appId cho đường dẫn Firestore của người dùng
+// Lấy projectId từ cấu hình Firebase, hoặc dùng fallback nếu không có
+const appId = firebaseConfig.projectId || 'default-app-id'; // Dùng projectId làm appId để nhất quán với đường dẫn Firestore
+const initialAuthToken = null; // Token này chỉ dùng trong môi trường Canvas, không cần khi deploy thật
+
+// Log appId để kiểm tra
+console.log("App ID for Firestore paths:", appId);
 
 // Function to format numbers with commas for thousands
 // Hàm định dạng số với dấu phẩy
